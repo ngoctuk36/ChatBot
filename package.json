@@ -1,0 +1,21 @@
+{
+  "name": "school-ai-chatbot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "School AI chatbot built with Vite and Google Gemini API.",
+  "scripts": {
+    "dev": "concurrently \"vite\" \"node --env-file-if-exists=.env server.js\"",
+    "start": "node --env-file-if-exists=.env server.js",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "concurrently": "latest",
+    "vite": "latest"
+  },
+  "dependencies": {
+    "@google/genai": "^2.19.0",
+    "groq-sdk": "^1.6.0"
+  }
+}
