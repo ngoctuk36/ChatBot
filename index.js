@@ -22,7 +22,7 @@ function setLoading(loading) {
     movieBossText.textContent = 'Mình đang suy nghĩ một chút...'
   } else {
     setupInputContainer.classList.remove('loading-state')
-    sendButton.innerHTML = '<img src="images/send-btn-icon.png" alt="Gửi">'
+    sendButton.innerHTML = '<img src="/images/send-btn-icon.png" alt="Gửi">'
   }
 }
 
