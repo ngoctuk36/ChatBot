@@ -1,52 +1,60 @@
 <!doctype html>
-<html>
+<html lang="vi">
 
 <head>
-	<title>Trợ lý AI - THPT Chuyên Thái Nguyên</title>
-	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<meta charset="UTF-8">
-	<link rel="preconnect" href="https://fonts.googleapis.com">
-	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-	<link href="https://fonts.googleapis.com/css2?family=Albert+Sans:ital,wght@0,100..900;1,100..900&display=swap"
-		rel="stylesheet">
-	<link rel="stylesheet" href="index.css">
+  <title>Trợ lý AI - THPT Chuyên Thái Nguyên</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="UTF-8">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Albert+Sans:ital,wght@0,100..900;1,100..900&display=swap">
+  <link rel="stylesheet" href="/index.css">
 </head>
 
 <body>
-	<header>
-		<img src="/images/logo.jpg" alt="">
-		<a href="/">Tin k36 - lifeAI</a>
-	</header>
-	<main>
-		<!-- Chat input -->
-		<section id="setup-container">
-			<div class="setup-inner">
-<img src="/images/movieboss.png" alt="">
-				<div class="speech-bubble-ai" id="speech-bubble-ai">
-					<p id="movie-boss-text">
-						Bạn cần mình hỗ trợ thông tin gì nhỉ?
-					</p>
-				</div>
-			</div>
-			<div class="setup-inner setup-input-container" id="setup-input-container">
-				<textarea id="setup-textarea" placeholder="Vui lòng nhập câu hỏi ở đây."></textarea>
-				<button class="send-btn" id="send-btn" aria-label="send">
-					<img src="/images/send-btn-icon.png" alt="send">
-				</button>
-			</div>
-		</section>
-		<!-- Chat output -->
-		<section class="output-container" id="output-container">
-			<div id="output-img-container" class="output-img-container"></div>
-			<h1 id="output-title"></h1>
-			<h2 id="output-stars"></h2>
-			<p id="output-text"></p>
-		</section>
-	</main>
-	<footer>
-		&copy; 2026 THPT Chuyên Thái Nguyên
-	</footer>
-	<script type="module" src="index.js"></script>
+  <header>
+    <img src="/images/logo.jpg" alt="">
+    <a href="/">Tin k36 - lifeAI</a>
+  </header>
+
+  <main>
+    <section id="chat-container" class="chat-container">
+      <div class="chat-workspace">
+        <div class="assistant-panel">
+          <div class="assistant-avatar">
+            <img src="/images/movieboss.png" alt="Trợ lý AI">
+          </div>
+
+          <div class="speech-bubble-ai" id="speech-bubble-ai">
+            <p id="movie-boss-text">Bạn cần mình hỗ trợ thông tin gì nhỉ?</p>
+          </div>
+        </div>
+
+        <div class="answer-panel">
+          <div class="answer-panel-header">
+            <strong>Cuộc trò chuyện</strong>
+            <span id="memory-count">0/20 lượt</span>
+          </div>
+          <div id="chat-history" class="chat-history" aria-live="polite">
+            <div id="empty-chat" class="empty-chat">Các câu hỏi và câu trả lời sẽ xuất hiện ở đây.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="setup-input-container" id="setup-input-container">
+        <textarea id="setup-textarea" placeholder="Vui lòng nhập câu hỏi ở đây."></textarea>
+        <button class="send-btn" id="send-btn" aria-label="send">
+          <img src="/images/send-btn-icon.png" alt="Gửi">
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    &copy; 2026 THPT Chuyên Thái Nguyên
+  </footer>
+
+  <script type="module" src="/index.js"></script>
 </body>
 
 </html>

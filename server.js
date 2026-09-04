@@ -74,9 +74,26 @@ async function readJson(req) {
   }
 }
 
+function normalizeHistory(history) {
+  if (!Array.isArray(history)) return []
+
+  return history
+    .filter(item =>
+      item &&
+      (item.role === 'user' || item.role === 'assistant') &&
+      typeof item.content === 'string' &&
+      item.content.trim()
+    )
+    .slice(-40)
+    .map(item => ({
+      role: item.role,
+      content: item.content.trim().slice(0, 12000),
+    }))
+}
+
 async function handleChat(req, res) {
-  const groqClient = getGroqClient();
-  const currentModel = process.env.GROQ_MODEL;
+  const groqClient = getGroqClient()
+  const currentModel = process.env.GROQ_MODEL
 
   if (!groqClient) {
     return sendJson(res, 500, {
@@ -86,6 +103,7 @@ async function handleChat(req, res) {
 
   const data = await readJson(req)
   const message = typeof data.message === 'string' ? data.message.trim() : ''
+  const history = normalizeHistory(data.history)
 
   if (!message) {
     return sendJson(res, 400, { error: 'Vui lòng nhập câu hỏi.' })
@@ -101,8 +119,9 @@ async function handleChat(req, res) {
       messages: [
         {
           role: 'system',
-          content: 'Bạn là trợ lý AI thân thiện của một trường THPT. Trả lời bằng tiếng Việt, rõ ràng, hữu ích và phù hợp với học sinh. Khi câu hỏi cần giải thích, trình bày từng bước nhưng không dài dòng không cần thiết.'
+          content: 'Bạn là trợ lý AI thân thiện của một trường THPT. Trả lời bằng tiếng Việt, rõ ràng, hữu ích và phù hợp với học sinh. Khi câu hỏi cần giải thích, trình bày từng bước nhưng không dài dòng không cần thiết. Bạn có thể dùng Markdown để làm câu trả lời dễ đọc: tiêu đề bằng ##, chữ đậm bằng **, danh sách bằng -, bảng khi phù hợp và khối code bằng ```.'
         },
+        ...history,
         {
           role: 'user',
           content: message,
@@ -112,7 +131,7 @@ async function handleChat(req, res) {
       temperature: 0.7,
     })
   } catch (error) {
-    console.error("Lỗi Groq API:", error);
+    console.error('Lỗi Groq API:', error)
     const status = Number(error?.status) || 502
     const apiMessage = error?.message || 'Không thể kết nối tới Groq API.'
     const wrapped = new Error(apiMessage)

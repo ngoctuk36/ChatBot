@@ -2,6 +2,7 @@ import { Groq } from 'groq-sdk'
 
 const MODEL = process.env.GROQ_MODEL || ''
 const API_KEY = process.env.GROQ_API_KEY || ''
+const MAX_HISTORY_MESSAGES = 40
 
 function json(res, status, data) {
   return res.status(status).json(data)
@@ -10,6 +11,23 @@ function json(res, status, data) {
 function getGroqClient() {
   if (!API_KEY) return null
   return new Groq({ apiKey: API_KEY })
+}
+
+function normalizeHistory(history) {
+  if (!Array.isArray(history)) return []
+
+  return history
+    .filter(item =>
+      item &&
+      (item.role === 'user' || item.role === 'assistant') &&
+      typeof item.content === 'string' &&
+      item.content.trim()
+    )
+    .slice(-MAX_HISTORY_MESSAGES)
+    .map(item => ({
+      role: item.role,
+      content: item.content.trim().slice(0, 12000),
+    }))
 }
 
 export default async function handler(req, res) {
@@ -40,6 +58,7 @@ export default async function handler(req, res) {
   try {
     const data = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {})
     const message = typeof data.message === 'string' ? data.message.trim() : ''
+    const history = normalizeHistory(data.history)
 
     if (!message) {
       return json(res, 400, { error: 'Vui lòng nhập câu hỏi.' })
@@ -56,8 +75,9 @@ export default async function handler(req, res) {
         {
           role: 'system',
           content:
-            'Bạn là trợ lý AI thân thiện của một trường THPT. Trả lời bằng tiếng Việt, rõ ràng, hữu ích và phù hợp với học sinh. Khi câu hỏi cần giải thích, trình bày từng bước nhưng không dài dòng không cần thiết.',
+            'Bạn là trợ lý AI thân thiện của một trường THPT. Trả lời bằng tiếng Việt, rõ ràng, hữu ích và phù hợp với học sinh. Khi câu hỏi cần giải thích, trình bày từng bước nhưng không dài dòng không cần thiết. Bạn có thể dùng Markdown để làm câu trả lời dễ đọc: tiêu đề bằng ##, chữ đậm bằng **, danh sách bằng -, bảng khi phù hợp và khối code bằng ```.',
         },
+        ...history,
         {
           role: 'user',
           content: message,
