@@ -1,3 +1,5 @@
+import { Groq } from 'groq-sdk'
+
 const SCHOOL_WEBSITE = 'https://thptchuyenthainguyen.edu.vn/?tab=home&lang=vi&pid=101&cid=101'
 const SCHOOL_ORIGIN = new URL(SCHOOL_WEBSITE).origin
 const WEB_TIMEOUT_MS = 7000
