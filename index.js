@@ -3,7 +3,7 @@ const setupTextarea = document.getElementById('setup-textarea')
 const sendButton = document.getElementById('send-btn')
 const movieBossText = document.getElementById('movie-boss-text')
 const chatHistory = document.getElementById('chat-history')
-const memoryCount = document.getElementById('memory-count')
+const clearChatButton = document.getElementById('clear-chat-btn')
 
 const MAX_TURNS = 20
 const STORAGE_KEY = 'lifeai-chat-history-v1'
@@ -166,10 +166,6 @@ function saveConversation() {
   }
 }
 
-function updateMemoryCount() {
-  memoryCount.textContent = `${conversation.length}/${MAX_TURNS} lượt`
-}
-
 function scrollChatToBottom() {
   requestAnimationFrame(() => {
     chatHistory.scrollTop = chatHistory.scrollHeight
@@ -201,6 +197,19 @@ function createMessageElement(role, text) {
   return row
 }
 
+function clearConversation() {
+  if (!conversation.length) return
+
+  const confirmed = window.confirm('Xóa toàn bộ tin nhắn trong cuộc trò chuyện này?')
+  if (!confirmed) return
+
+  conversation = []
+  saveConversation()
+  renderConversation()
+  movieBossText.textContent = 'Đã xóa cuộc trò chuyện. Mình sẵn sàng cho câu hỏi mới nhé! 🚀'
+  setupTextarea.focus()
+}
+
 function renderConversation() {
   chatHistory.innerHTML = ''
 
@@ -219,7 +228,6 @@ function renderConversation() {
     }
   }
 
-  updateMemoryCount()
   scrollChatToBottom()
 }
 
@@ -326,6 +334,7 @@ async function sendMessage() {
 }
 
 sendButton.addEventListener('click', sendMessage)
+clearChatButton?.addEventListener('click', clearConversation)
 
 setupTextarea.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey) {
