@@ -13,6 +13,229 @@ const HOST = process.env.HOST || '127.0.0.1'
 const MODEL = process.env.GROQ_MODEL
 const API_KEY = process.env.GROQ_API_KEY || ''
 
+const SCHOOL_WEBSITE = 'https://thptchuyenthainguyen.edu.vn/?tab=home&lang=vi&pid=101&cid=101'
+const SCHOOL_ORIGIN = new URL(SCHOOL_WEBSITE).origin
+const WEB_TIMEOUT_MS = 7000
+const MAX_WEBSITE_CONTEXT_CHARS = 5500
+const MAX_PAGE_EXCERPT_CHARS = 3000
+const MAX_LINKS_TO_FETCH = 3
+const MAX_HISTORY_CHARS = 5000
+const MAX_HISTORY_MESSAGES = 20
+
+const WEB_TRIGGER_RE = /(trường|thpt chuyên thái nguyên|chuyên thái nguyên|ctn|thầy|cô|giáo viên|học sinh|lớp|thi đua|nề nếp|đồng phục|chào cờ|sinh hoạt|lịch công tác|thời khóa biểu|tkb|thông báo|văn bản|quy định|stem|phong trào|hoạt động|sự kiện|ngày hội|cuộc thi|tuyển sinh|nghỉ học|nghỉ lễ|hôm nay|tuần này|tuần sau|mới nhất|cập nhật|2026|2027)/i
+
+const WEBSITE_HELP_RE = /(bạn|cậu|lifeai).{0,40}(tra cứu|tìm|xem).{0,40}(website|web|thông tin|được gì|gì)|tra cứu.{0,40}(website|web).{0,40}(gì|được gì)|website.{0,40}(tra cứu|xem).{0,40}(gì|được gì)|có thể.{0,40}(tra cứu|xem).{0,40}(website|web)/iu
+
+const VAGUE_WEBSITE_RE = /^(thông tin về trường|về trường|thông tin trường|trường có gì|tra cứu về trường|xem thông tin trường|cho tôi thông tin về trường)[?.!\s]*$/iu
+
+const WEBSITE_HELP_ANSWER = `## lifeAI có thể tra cứu gì trên website trường? 🚀
+
+Mình có thể tra cứu các thông tin được đăng trên website THPT Chuyên Thái Nguyên, ví dụ:
+
+- 📢 **Thông báo** mới của trường.
+- 📅 **Lịch công tác, lịch học** và các thông tin theo tuần.
+- 🏆 **Cuộc thi, HSG, STEM, phong trào và hoạt động** của trường.
+- 👨‍🎓 **Thông tin/danh sách liên quan đến học sinh** khi được đăng công khai.
+- 📋 **Quy định, hướng dẫn, văn bản** của nhà trường.
+- 🏫 Các **tin tức và sự kiện** được đăng trên website.
+
+Cậu cứ hỏi cụ thể như: **“Lịch công tác tuần này có gì?”**, **“Có thông báo STEM nào mới không?”** hoặc **“Quy định thi đua nói gì về lỗi dùng điện thoại?”** là mình có thể tra cứu đúng phần cần tìm.`
+
+const WEBSITE_VAGUE_ANSWER = `Mình tra cứu được nhé 😄 Nhưng câu hỏi này hơi rộng. Cậu muốn mình tìm **thông báo**, **lịch công tác/lịch học**, **thi đua - nề nếp**, **HSG/STEM/cuộc thi**, **tuyển sinh**, hay **một văn bản/sự kiện cụ thể**? Nêu chủ đề hoặc tên thông tin cần tìm, mình sẽ tra đúng phần đó.`
+
+function cleanText(html) {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+    .replace(/<template[\s\S]*?<\/template>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<nav\b[\s\S]*?<\/nav>/gi, ' ')
+    .replace(/<footer\b[\s\S]*?<\/footer>/gi, ' ')
+    .replace(/<header\b[\s\S]*?<\/header>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&#(?:8211|8212);/gi, '-')
+    .replace(/&#(?:8220|8221);/gi, '"')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function extractPageTitle(html) {
+  const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]
+  const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1]
+  return cleanText(title || h1 || '').slice(0, 220)
+}
+
+function extractLinks(html) {
+  const links = []
+  const seen = new Set()
+  const re = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi
+  let match
+
+  while ((match = re.exec(html))) {
+    const href = match[1].trim()
+    const label = cleanText(match[2]).slice(0, 180)
+    if (!href || /^(#|javascript:|mailto:|tel:)/i.test(href)) continue
+
+    try {
+      const url = new URL(href, SCHOOL_WEBSITE)
+      if (url.origin !== SCHOOL_ORIGIN) continue
+      url.hash = ''
+      const key = url.toString()
+      if (seen.has(key) || key === SCHOOL_WEBSITE) continue
+      seen.add(key)
+      links.push({
+        url: key,
+        label,
+        text: `${label} ${url.pathname} ${url.search}`.toLowerCase(),
+      })
+    } catch {
+      // Bỏ qua liên kết lỗi.
+    }
+  }
+
+  return links
+}
+
+async function fetchText(url) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), WEB_TIMEOUT_MS)
+
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'lifeAI-school-bot/2.0',
+        Accept: 'text/html,application/xhtml+xml',
+      },
+    })
+
+    if (!response.ok) return null
+    const contentType = response.headers.get('content-type') || ''
+    if (!contentType.includes('text/html') && !contentType.includes('application/xhtml+xml')) return null
+
+    const html = await response.text()
+    return { html, text: cleanText(html), title: extractPageTitle(html) }
+  } catch (error) {
+    console.warn('Không thể đọc website trường:', url, error?.message || error)
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function tokenizeQuestion(question) {
+  return question
+    .toLowerCase()
+    .normalize('NFC')
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(word => word.length >= 3 && !['của', 'cho', 'với', 'nào', 'như', 'được', 'mình', 'bạn', 'cậu'].includes(word))
+}
+
+function scoreLink(link, question) {
+  const words = tokenizeQuestion(question)
+  let score = 0
+  for (const word of words) {
+    if (link.text.includes(word)) score += word.length >= 6 ? 4 : 1
+  }
+  if (/(lịch công tác|tuần này|tuần sau|lịch)/iu.test(question) && /lich|lịch|cong-tac|công-tác|ke-hoach|kế-hoạch|tuan|tuần/iu.test(link.text)) score += 7
+  if (/(thông báo|mới nhất|cập nhật)/iu.test(question) && /news|tin|thong-bao|thông-báo/iu.test(link.text)) score += 7
+  if (/(thi đua|nề nếp|quy định)/iu.test(question) && /quy-dinh|quy-định|thi-dua|thi-đua|ne-nep|nề-nếp/iu.test(link.text)) score += 8
+  return score
+}
+
+function excerptText(text, question, maxChars = MAX_PAGE_EXCERPT_CHARS) {
+  if (!text) return ''
+  if (text.length <= maxChars) return text
+
+  const words = tokenizeQuestion(question).slice(0, 8)
+  const lower = text.toLowerCase()
+  const positions = words
+    .map(word => lower.indexOf(word))
+    .filter(position => position >= 0)
+    .sort((a, b) => a - b)
+
+  if (!positions.length) return text.slice(0, maxChars)
+
+  const center = positions[0]
+  const start = Math.max(0, center - Math.floor(maxChars * 0.28))
+  return `${start > 0 ? '... ' : ''}${text.slice(start, start + maxChars)}${start + maxChars < text.length ? ' ...' : ''}`
+}
+
+async function getWebsiteContext(question) {
+  if (!WEB_TRIGGER_RE.test(question) || WEBSITE_HELP_RE.test(question)) return ''
+
+  const homepage = await fetchText(SCHOOL_WEBSITE)
+  if (!homepage) return ''
+
+  const links = extractLinks(homepage.html)
+    .map(link => ({ ...link, score: scoreLink(link, question) }))
+    .filter(link => link.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, MAX_LINKS_TO_FETCH)
+
+  const chunks = []
+  let remaining = MAX_WEBSITE_CONTEXT_CHARS
+
+  const addChunk = (value) => {
+    if (!value || remaining <= 0) return
+    const clipped = value.slice(0, remaining)
+    chunks.push(clipped)
+    remaining -= clipped.length
+  }
+
+  addChunk(`NGUỒN: ${SCHOOL_WEBSITE}\nTIÊU ĐỀ TRANG: ${homepage.title || 'Trang chủ'}\n${excerptText(homepage.text, question, 1800)}`)
+
+  const pages = await Promise.all(links.map(async link => {
+    const page = await fetchText(link.url)
+    if (!page) return null
+    return `NGUỒN: ${link.url}\nTIÊU ĐỀ: ${link.label || page.title || '(không rõ)'}\n${excerptText(page.text, question)}`
+  }))
+
+  for (const page of pages) {
+    if (!page || remaining <= 0) break
+    addChunk(`\n---\n${page}`)
+  }
+
+  return chunks.join('').slice(0, MAX_WEBSITE_CONTEXT_CHARS)
+}
+
+function normalizeHistory(history, maxChars = MAX_HISTORY_CHARS) {
+  if (!Array.isArray(history)) return []
+
+  const valid = history
+    .filter(item =>
+      item &&
+      (item.role === 'user' || item.role === 'assistant') &&
+      typeof item.content === 'string' &&
+      item.content.trim()
+    )
+    .slice(-MAX_HISTORY_MESSAGES)
+    .map(item => ({
+      role: item.role,
+      content: item.content.trim(),
+    }))
+
+  const selected = []
+  let total = 0
+
+  for (let i = valid.length - 1; i >= 0; i--) {
+    const item = valid[i]
+    const remaining = maxChars - total
+    if (remaining <= 0) break
+    const content = item.content.slice(0, Math.min(item.content.length, remaining - 40))
+    if (!content) break
+    selected.push({ role: item.role, content })
+    total += content.length
+  }
+
+  return selected.reverse()
+}
+
 const SYSTEM_PROMPT = `
 Bạn là lifeAI, trợ lý ảo thông thái chuyên giải quyết mẹo vặt cuộc sống và là "Chuyên gia dữ liệu thi đua" dành riêng cho học sinh trường THPT Chuyên Thái Nguyên (Năm học 2026 - 2027).
 
@@ -26,7 +249,14 @@ Bạn là lifeAI, trợ lý ảo thông thái chuyên giải quyết mẹo vặt
 - Khi nhắc tới điểm thi đua hoặc số lần vi phạm, PHẢI bôi đậm các con số điểm cộng/trừ và số lần vi phạm, ví dụ: **-10 điểm**, **3 lần**, **+5 điểm**.
 - Dùng gạch đầu dòng khi giúp thông tin dễ quét; không ép mọi câu trả lời phải thành danh sách nếu một câu trả lời tự nhiên sẽ dễ hiểu hơn.
 - Có thể dùng Markdown: ## tiêu đề, **chữ đậm**, danh sách -, bảng khi phù hợp và khối code bằng \`\`\`.
-- Chỉ nhớ và sử dụng tối đa **20 câu hỏi gần nhất** trong ngữ cảnh hội thoại. Khi đã vượt quá giới hạn này, các câu hỏi cũ hơn không còn được dùng để suy luận câu trả lời.
+- KHÔNG được dùng hoặc hiển thị HTML trong câu trả lời, đặc biệt là <br>, </br>, <p>, </p>, <div>, <span>.
+- Khi cần xuống dòng, hãy dùng xuống dòng thông thường hoặc Markdown, không dùng <br>.
+- Không bao giờ trả về chuỗi HTML chỉ để tạo khoảng cách hoặc xuống dòng.
+- Chỉ nhớ và sử dụng tối đa **20 câu hỏi gần nhất** trong ngữ cảnh hội thoại.
+- Website chính thức để tra cứu thông tin trường: https://thptchuyenthainguyen.edu.vn/?tab=home&lang=vi&pid=101&cid=101 . Khi hệ thống cung cấp WEBSITE_CONTEXT, hãy coi đó là dữ liệu tra cứu hiện tại và ưu tiên nó cho thông tin có thể thay đổi. Khi đã vượt quá giới hạn này, các câu hỏi cũ hơn không còn được dùng để suy luận câu trả lời.
+- Khi người dùng hỏi kiểu “bạn có thể tra cứu gì trên website?”, hãy giới thiệu ngắn gọn các nhóm thông tin lifeAI có thể tra cứu; không cần bịa thông tin mới và không cần gọi website chỉ để trả lời khả năng của chính mình.
+- Khi người dùng hỏi về trường nhưng câu hỏi quá chung (ví dụ “cho tôi thông tin về trường”), hãy hỏi họ muốn tra cứu nhóm nào cụ thể hơn như thông báo, lịch công tác, thi đua - nề nếp, HSG/STEM, tuyển sinh hoặc văn bản/sự kiện.
+- Nếu website không cung cấp đủ dữ liệu cho câu hỏi, nói rõ là chưa tìm thấy hoặc dữ liệu chưa đủ và đề nghị người dùng hỏi cụ thể hơn; không đoán.
 - Không tuyên bố mình nhớ được các cuộc trò chuyện đã bị xóa hoặc các câu hỏi nằm ngoài 20 câu gần nhất.
 
 [CƠ SỞ DỮ LIỆU NỘI QUY CHUYÊN THÁI NGUYÊN - BẮT BUỘC SỬ DỤNG CHÍNH XÁC]
@@ -80,7 +310,7 @@ Bạn là lifeAI, trợ lý ảo thông thái chuyên giải quyết mẹo vặt
 
 [CÂU CHÀO MẶC ĐỊNH]
 Nếu người dùng chỉ chào hỏi hoặc bắt đầu cuộc trò chuyện mà chưa có câu hỏi cụ thể, hãy dùng hoặc biến thể rất gần với câu sau:
-"Xin chào! Mình là lifeAI - trợ lý tối ưu cuộc sống kiêm 'bộ não dữ liệu' nề nếp Chuyên Thái Nguyên đây. Cậu cần mẹo vặt dọn dẹp, xử lý sự cố hay muốn check nhanh xem một hành vi sẽ bị trừ bao nhiêu điểm thi đua? Nói cho lifeAI biết nhé! 🚀"
+"Xin chào! Mình là lifeAI - trợ lý tối ưu cuộc sống kiêm 'bộ não dữ liệu' nề nếp Chuyên Thái Nguyên 2026-2027 đây. Cậu cần mẹo vặt dọn dẹp, xử lý sự cố hay muốn check nhanh xem một hành vi sẽ bị trừ bao nhiêu điểm thi đua? Nói cho lifeAI biết nhé! 🚀"
 `.trim()
 
 const getGroqClient = () => {
@@ -144,72 +374,114 @@ async function readJson(req) {
   }
 }
 
-function normalizeHistory(history) {
-  if (!Array.isArray(history)) return []
-
-  return history
-    .filter(item =>
-      item &&
-      (item.role === 'user' || item.role === 'assistant') &&
-      typeof item.content === 'string' &&
-      item.content.trim()
-    )
-    .slice(-40)
-    .map(item => ({
-      role: item.role,
-      content: item.content.trim().slice(0, 12000),
-    }))
+function cleanAiReply(text) {
+  return String(text || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>\s*<p[^>]*>/gi, '\n\n')
+    .replace(/<li[^>]*>/gi, '- ')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/<\/?(ul|ol|p|div|span|strong|b|em|i|table|thead|tbody|tr|th|td)[^>]*>/gi, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/<[^>]+>/g, '')
+    .replace(/\n[ \t]+\n/g, '\n\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 async function handleChat(req, res) {
-  const groqClient = getGroqClient()
   const currentModel = process.env.GROQ_MODEL
-
-  if (!groqClient) {
-    return sendJson(res, 500, {
-      error: 'Thiếu GROQ_API_KEY trong file .env.',
-    })
-  }
 
   const data = await readJson(req)
   const message = typeof data.message === 'string' ? data.message.trim() : ''
-  const history = normalizeHistory(data.history)
 
   if (!message) {
     return sendJson(res, 400, { error: 'Vui lòng nhập câu hỏi.' })
   }
 
-  if (message.length > 8000) {
-    return sendJson(res, 400, { error: 'Câu hỏi quá dài. Vui lòng rút ngắn dưới 8000 ký tự.' })
+  if (message.length > 5000) {
+    return sendJson(res, 400, { error: 'Câu hỏi quá dài. Vui lòng rút ngắn dưới 5000 ký tự.' })
   }
+
+  if (WEBSITE_HELP_RE.test(message)) {
+    return sendJson(res, 200, { reply: WEBSITE_HELP_ANSWER })
+  }
+
+  if (VAGUE_WEBSITE_RE.test(message)) {
+    return sendJson(res, 200, { reply: WEBSITE_VAGUE_ANSWER })
+  }
+
+  const groqClient = getGroqClient()
+
+  if (!groqClient) {
+    return sendJson(res, 500, { error: 'Thiếu GROQ_API_KEY trong file .env.' })
+  }
+
+  if (!currentModel) {
+    return sendJson(res, 500, { error: 'Thiếu GROQ_MODEL trong file .env.' })
+  }
+
+  const history = normalizeHistory(data.history)
+  const websiteContext = await getWebsiteContext(message)
+
+  const buildMessages = (historyItems, website) => [
+    {
+      role: 'system',
+      content: SYSTEM_PROMPT,
+    },
+    ...historyItems,
+    ...(website ? [{
+      role: 'system',
+      content: `WEBSITE_CONTEXT - DỮ LIỆU TRA CỨU TỪ WEBSITE TRƯỜNG:\n${website}\n\nChỉ sử dụng dữ liệu website này khi nó liên quan trực tiếp đến câu hỏi hiện tại. Nếu dữ liệu không đủ hoặc không rõ, nói rõ và không tự bịa. Nếu câu hỏi còn quá chung, hãy hỏi người dùng muốn tra cứu phần nào cụ thể hơn.`,
+    }] : []),
+    {
+      role: 'user',
+      content: message,
+    },
+  ]
 
   let chatCompletion
   try {
     chatCompletion = await groqClient.chat.completions.create({
-      messages: [
-        {
-          role: 'system',
-          content: SYSTEM_PROMPT
-        },
-        ...history,
-        {
-          role: 'user',
-          content: message,
-        },
-      ],
+      messages: buildMessages(history, websiteContext),
       model: currentModel,
       temperature: 0.7,
+      max_tokens: 800,
     })
   } catch (error) {
-    console.error('Lỗi Groq API:', error)
+    const apiMessage = String(error?.message || '')
     const status = Number(error?.status) || 502
-    const apiMessage = error?.message || 'Không thể kết nối tới Groq API.'
-    const wrapped = new Error(apiMessage)
-    wrapped.statusCode = status
-    throw wrapped
+    const tooLarge = status === 413 || /requested .*tokens|tokens per minute|request too large|ratelimitexceeded/i.test(apiMessage)
+
+    if (!tooLarge) {
+      console.error('Lỗi Groq API:', error)
+      const wrapped = new Error(apiMessage || 'Không thể kết nối tới Groq API.')
+      wrapped.statusCode = status
+      throw wrapped
+    }
+
+    try {
+      chatCompletion = await groqClient.chat.completions.create({
+        messages: buildMessages(normalizeHistory(data.history, 2200), websiteContext.slice(0, 2200)),
+        model: currentModel,
+        temperature: 0.7,
+        max_tokens: 1000,
+      })
+    } catch (retryError) {
+      console.error('Lỗi Groq API sau khi giảm context:', retryError)
+      const retryStatus = Number(retryError?.status) || 502
+      const wrapped = new Error(retryError?.message || 'Không thể kết nối tới Groq API.')
+      wrapped.statusCode = retryStatus
+      throw wrapped
+    }
   }
 
-  const reply = chatCompletion?.choices?.[0]?.message?.content?.trim() || ''
+  const rawReply = chatCompletion?.choices?.[0]?.message?.content || ''
+  const reply = cleanAiReply(rawReply)
 
   if (!reply) {
     throw new Error('Groq API không trả về nội dung trả lời.')

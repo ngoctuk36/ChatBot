@@ -1,6 +1,6 @@
 # School AI Chatbot
 
-Chatbot đơn giản dùng Vite + Node.js + Groq API.
+Chatbot lifeAI dùng Vite + Node.js + Groq API, có tra cứu chọn lọc website THPT Chuyên Thái Nguyên và giới hạn context để giảm lỗi vượt TPM.
 
 ## Chạy local
 
@@ -45,3 +45,10 @@ Không commit file `.env` lên GitHub và không đặt `GROQ_API_KEY` trong Jav
 ```bash
 npm run build
 ```
+
+
+## Tra cứu website
+
+lifeAI có thể nhận biết câu hỏi liên quan đến website trường và chỉ lấy các trang có điểm phù hợp cao. Context website được giới hạn ở mức nhỏ để tránh vượt giới hạn Tokens Per Minute (TPM).
+
+Các câu hỏi kiểu “lifeAI có thể tra cứu gì trên website?” được trả lời trực tiếp, không cần gọi Groq. Khi câu hỏi về trường còn quá chung, lifeAI sẽ yêu cầu bạn nói rõ chủ đề hơn thay vì nhồi toàn bộ website vào prompt.
